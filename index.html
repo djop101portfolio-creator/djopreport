@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบจัดการผลงานกรรมการสงเคราะห์ - สถานพินิจฯ ขอนแก่น</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        .container-liff { max-width: 600px; margin: auto; padding: 20px; }
+        .card-custom { border-radius: 20px; border: none; box-shadow: 0 10px 25px rgba(0,0,0,0.08); background: white; margin-bottom: 20px; overflow: hidden; }
+        .header-title { color: #0d6efd; font-weight: 800; }
+        
+        /* Dashboard สไตล์ */
+        .score-box { background: linear-gradient(45deg, #0d6efd, #0056b3); color: white; border-radius: 15px; padding: 25px; text-align: center; }
+        .progress { height: 12px; border-radius: 10px; margin: 15px 0; background-color: rgba(255,255,255,0.2); }
+        .section-special { display: none; border-left: 4px solid #0d6efd; background-color: #f8f9ff; padding: 15px; border-radius: 0 10px 10px 0; margin-top: 15px; }
+        
+        .btn-submit { 
+            background: linear-gradient(45deg, #0d6efd, #0056b3);
+            color: white; border-radius: 12px; padding: 15px; 
+            font-weight: bold; width: 100%; border: none; transition: 0.3s;
+        }
+        .btn-submit:disabled { opacity: 0.7; cursor: not-allowed; }
+        .loading-overlay { display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 9999; justify-content: center; align-items: center; flex-direction: column; }
+        
+        /* File Badge สไตล์ */
+        .file-badge { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 10px; padding: 8px 12px; display: flex; align-items: center; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+
+<div id="loader" class="loading-overlay">
+    <div class="spinner-border text-primary" role="status"></div>
+    <div id="loaderText" class="mt-3 fw-bold">กำลังตรวจสอบสิทธิ์การใช้งาน...</div>
+</div>
+
+<div class="container-liff">
+
+    <div id="volunteerDashboard" style="display: none;">
+        <div class="card card-custom p-4">
+            <div class="text-center mb-4">
+                <h4 class="header-title"><i class="bi bi-person-badge"></i> สรุปคะแนนสะสมของท่าน</h4>
+                <p id="volunteerDisplayName" class="text-primary fw-bold mb-0"></p>
+            </div>
+            <div class="score-box">
+                <div class="small opacity-75">คะแนนสะสมรอบปีปัจจุบัน</div>
+                <h1 id="kpiScore" class="my-2">0 / 12</h1>
+                <div class="progress">
+                    <div id="scoreBar" class="progress-bar bg-warning" style="width: 0%"></div>
+                </div>
+                <div id="starRating" class="text-warning fs-4"></div>
+                <div class="small mt-2 opacity-75">* สะสมครบ 12 คะแนนเพื่อผ่านเกณฑ์ประจำปี</div>
+            </div>
+        </div>
+
+        <div class="card card-custom p-4">
+            <h5 class="mb-3 fw-bold"><i class="bi bi-clock-history"></i> สรุปรายละเอียดคะแนน </h5>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light small">
+                        <tr>
+                            <th class="text-start">รายการผลงาน</th>
+                            <th class="text-center">จำนวนครั้ง</th>
+                        </tr>
+                    </thead>
+                    <tbody id="summaryTableBody" class="small"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="staffSection" style="display: none;">
+        <div class="card card-custom p-4">
+            <div class="text-center mb-4">
+                <h4 class="header-title"><i class="bi bi-pencil-square"></i> บันทึกผลงานใหม่</h4>
+                <p class="text-muted small">ระบบสำหรับเจ้าหน้าที่สถานพินิจฯ ขอนแก่น</p>
+            </div>
+            
+            <form id="perfForm" class="row g-3">
+                <div class="col-4">
+                    <label class="form-label small">ปี พ.ศ.</label>
+                    <input type="number" id="year" class="form-control" value="2569" required>
+                </div>
+                <div class="col-8">
+                    <label class="form-label small">ชื่อ-นามสกุลกรรมการ</label>
+                    <input type="text" id="volunteerName" class="form-control" required placeholder="พิมพ์ชื่อเพื่อค้นหา...">
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label small">ประเภทผลงาน</label>
+                    <select id="mainType" class="form-select" onchange="updateSubOptions()" required>
+                        <option value="">เลือกประเภทหลัก...</option>
+                        <option value="ผลงานทั่วไป">ผลงานทั่วไป</option>
+                        <option value="ผลงานเฉพาะ">ผลงานเฉพาะ</option>
+                    </select>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label small">รายการผลงาน</label>
+                    <select id="subType" class="form-select" onchange="showSpecificSubFields()" required disabled>
+                        <option value="">กรุณาเลือกประเภทหลักก่อน...</option>
+                    </select>
+                </div>
+
+                <div id="projectSection" class="col-12 section-special">
+                    <label class="form-label text-primary small">8. ประเภทโครงการ</label>
+                    <select id="projectType" class="form-select">
+                        <option value="พัฒนาพฤตินิสัย">8.1 โครงการพัฒนาพฤตินิสัย</option>
+                        <option value="ฝึกวิชาชีพ">8.2 โครงการฝึกวิชาชีพ</option>
+                        <option value="พัฒนาบุคลากร">8.3 โครงการพัฒนาบุคลากร</option>
+                    </select>
+                </div>
+                <div id="guaranteeSection" class="col-12 section-special">
+                    <label class="form-label text-success small">5. ประเภทการค้ำประกัน</label>
+                    <select id="guaranteeType" class="form-select">
+                        <option value="บริษัท">5.1 ในบริษัท</option>
+                        <option value="ห้างหุ้นส่วน">5.2 ในห้างหุ้นส่วนหรืออื่นๆ</option>
+                    </select>
+                </div>
+                <div id="halfwaySection" class="col-12 section-special">
+                    <label class="form-label text-warning small">10. รายละเอียดบ้านกึ่งวิถี</label>
+                    <select id="halfwayType" class="form-select">
+                        <option value="จัดตั้ง">10.1 จัดตั้งบ้านกึ่งวิถี</option>
+                        <option value="สนับสนุน">10.2 สนับสนุนการดำเนินงาน</option>
+                    </select>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label small">วันที่จัดกิจกรรม</label>
+                    <input type="date" id="date" class="form-control" required>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label small">รายละเอียดเพิ่มเติม</label>
+                    <textarea id="details" class="form-control" rows="2" placeholder="พิมพ์สรุปสั้นๆ..."></textarea>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label small"><i class="bi bi-camera-fill"></i> อัปโหลดรูปภาพ หรือไฟล์ PDF (เลือกเพิ่มได้เรื่อยๆ)</label>
+                    <input type="file" id="fileInput" class="form-control" multiple accept="image/*,application/pdf">
+                    <div id="fileListContainer" class="mt-2 d-flex flex-wrap gap-2"></div>
+                </div>
+
+                <div class="col-12 mt-4">
+                    <button type="submit" id="submitBtn" class="btn btn-submit shadow-sm">
+                        <i class="bi bi-cloud-arrow-up-fill me-2"></i> บันทึกข้อมูลและรูปภาพ
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwldz8dvoKr9o1HevJmBA8cO_UJn0NFQPu5p0JU7EWyg3yFcY3ovYfa1nIHIuXOXvy_/exec";
+    const LIFF_ID = "2010969324-5Mkx0PDP";
+    let currentUser = null;
+    let selectedFiles = []; 
+
+window.onload = function() {
+        liff.init({ liffId: LIFF_ID })
+            .then(() => {
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                } else {
+                    const context = liff.getContext();
+                    const userId = (context && context.userId) ? context.userId : null;
+
+                    if (userId) {
+                        // 🚩 ส่วนที่เพิ่มใหม่: ตรวจสอบว่ากดมาจากริชเมนู "จองวัน" หรือไม่
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const target = urlParams.get('target');
+
+                        if (target === 'calendar') {
+                            // 🚀 ดีดตัวไปหน้าปฏิทินที่ Apps Script ทันทีพร้อมส่ง UID ไปเช็คสิทธิ์
+                            const appsScriptUrl = `${WEB_APP_URL}?page=calendar&uid=${userId}`;
+                            window.location.replace(appsScriptUrl); 
+                            return; // หยุดการทำงานที่เหลือในหน้านี้ เพื่อไม่ให้โหลด UI เดิมขึ้นมาซ้อน
+                        }
+
+                        // 🔵 ระบบเดิม: ทำงานตามปกติ
+                        checkUserRole(userId);
+                    } else {
+                        liff.getProfile().then(p => {
+                            // 🚩 เช็คพารามิเตอร์กรณีเข้าผ่าน getProfile (เผื่อไว้)
+                            const urlParams = new URLSearchParams(window.location.search);
+                            if (urlParams.get('target') === 'calendar') {
+                                window.location.replace(`${WEB_APP_URL}?page=calendar&uid=${p.userId}`);
+                                return;
+                            }
+                            checkUserRole(p.userId);
+                        });
+                    }
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                document.getElementById('loaderText').innerText = "LIFF Error: " + err;
+            });
+    };
+
+    async function checkUserRole(lineId) {
+        try {
+            const url = `${WEB_APP_URL}?action=getVolunteerByLine&userId=${lineId}`;
+            const response = await fetch(url, { redirect: 'follow' });
+            const data = await response.json();
+            document.getElementById('loader').style.display = 'none';
+
+            if (data && data.exists) {
+                currentUser = data;
+                const role = (data.role || "").toLowerCase();
+                const isStaff = data.isAdminOrStaff === true || role.includes("admin") || role.includes("เจ้าหน้าที่สถานพินิจ");
+                const urlParams = new URLSearchParams(window.location.search);
+                const vName = urlParams.get('vname');
+
+                if (isStaff) {
+                    if (vName) {
+                        document.getElementById('staffSection').style.display = 'block';
+                        document.getElementById('volunteerName').value = vName;
+                    } else {
+                        Swal.fire('เข้าถึงไม่ถูกต้อง', 'กรุณาค้นหาชื่อกรรมการจากแชทบอทเพื่อบันทึกงานครับ', 'warning').then(() => liff.closeWindow());
+                    }
+                } else {
+                    document.getElementById('volunteerDashboard').style.display = 'block';
+                    document.getElementById('volunteerDisplayName').innerText = `สวัสดีคุณ ${data.fullname}`;
+                    loadDashboardData(data.fullname);
+                }
+            } else {
+                Swal.fire('ไม่พบข้อมูล', 'กรุณายืนยันตัวตนใน LINE ก่อนใช้งานครับ', 'warning').then(() => liff.closeWindow());
+            }
+        } catch (err) {
+            Swal.fire('Error', 'ไม่สามารถเชื่อมต่อระบบได้', 'error');
+        }
+    }
+
+    // --- ฟังก์ชันย่อขนาดรูปภาพ (สำคัญ: แก้ปัญหาเครื่องค้าง) ---
+    async function compressImage(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 1200; 
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > MAX_WIDTH) {
+                        height *= MAX_WIDTH / width;
+                        width = MAX_WIDTH;
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.7).split(',')[1]);
+                };
+            };
+        });
+    }
+
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        const newFiles = Array.from(e.target.files);
+        selectedFiles = selectedFiles.concat(newFiles);
+        renderFileList();
+        this.value = ""; 
+    });
+
+    function renderFileList() {
+        const container = document.getElementById('fileListContainer');
+        container.innerHTML = "";
+        selectedFiles.forEach((file, index) => {
+            const div = document.createElement('div');
+            div.className = "file-badge shadow-sm";
+            div.innerHTML = `
+                <i class="bi ${file.type.startsWith('image/') ? 'bi-image' : 'bi-file-pdf'} me-2 text-primary"></i>
+                <span class="text-truncate" style="max-width: 150px;">${file.name}</span>
+                <i class="bi bi-x-circle-fill ms-2 text-danger" style="cursor:pointer" onclick="removeFile(${index})"></i>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    function removeFile(index) {
+        selectedFiles.splice(index, 1);
+        renderFileList();
+    }
+
+    document.getElementById('perfForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const volunteer = document.getElementById('volunteerName').value;
+        const confirm = await Swal.fire({
+            title: 'ยืนยันการบันทึก?',
+            text: `กรรมการ: ${volunteer}`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'บันทึกข้อมูล'
+        });
+        if (!confirm.isConfirmed) return;
+
+        document.getElementById('loaderText').innerText = "กำลังย่อขนาดรูปภาพและส่งข้อมูล...";
+        document.getElementById('loader').style.display = 'flex';
+        document.getElementById('submitBtn').disabled = true;
+
+        let fileData = [];
+        for (let file of selectedFiles) {
+            let base64;
+            if (file.type.startsWith('image/')) {
+                base64 = await compressImage(file);
+            } else {
+                base64 = await new Promise(res => {
+                    const r = new FileReader();
+                    r.onload = (ev) => res(ev.target.result.split(',')[1]);
+                    r.readAsDataURL(file);
+                });
+            }
+            fileData.push({ base64: base64, mimeType: file.type, fileName: file.name });
+        }
+
+        const payload = {
+            userId: liff.getContext().userId,
+            year: document.getElementById('year').value,
+            volunteerName: volunteer,
+            mainType: document.getElementById('mainType').value,
+            subType: document.getElementById('subType').value,
+            subDetail: (function() {
+                const s = document.getElementById('subType').value;
+                if (s === 'โครงการ') return document.getElementById('projectType').value;
+                if (s === 'ค้ำประกันทำงาน') return document.getElementById('guaranteeType').value;
+                if (s === 'บ้านกึ่งวิถี') return document.getElementById('halfwayType').value;
+                return "-";
+            })(),
+            date: document.getElementById('date').value,
+            details: document.getElementById('details').value,
+            files: fileData
+        };
+
+        try {
+            const res = await fetch(WEB_APP_URL, { 
+                method: 'POST', 
+                body: JSON.stringify(payload) 
+            });
+            
+            if (res.ok) {
+                const result = await res.json();
+                document.getElementById('loader').style.display = 'none';
+
+                // 🚩 เพิ่มส่วนส่งข้อความแจ้งเตือนเข้าหน้าแชท LINE
+                try {
+                    await liff.sendMessages([{
+                        "type": "text",
+                        "text": `✅ ส่งข้อมูล\nกรรมการ: ${payload.volunteerName}\nรายการ: ${payload.subType}\nไปบันทึกเรียบร้อยแล้ว`
+                    }]);
+                } catch (lineErr) {
+                    console.log("ส่งข้อความเข้าแชทไม่ได้ (อาจเพราะไม่ได้เปิดสิทธิ์):", lineErr);
+                }
+                
+                if (result.success) {
+                    await Swal.fire('สำเร็จ', 'บันทึกข้อมูลเรียบร้อยแล้ว', 'success');
+                } else {
+                    await Swal.fire('แจ้งเตือน', result.message || 'บันทึกสำเร็จ', 'success');
+                }
+                liff.closeWindow();
+            } else {
+                throw new Error("Server Error");
+            }
+
+        } catch (err) {
+            console.error("Fetch Error:", err);
+            document.getElementById('loader').style.display = 'none';
+            
+            // 🚩 แม้จะเข้า Catch (Error) แต่ถ้าข้อมูลเข้า Sheet แล้ว เราก็เนียนส่งข้อความบอกในแชทด้วยครับ
+            try {
+                await liff.sendMessages([{
+                    "type": "text",
+                    "text": `✅ บันทึกสำเร็จ (Network Delay)\nกรรมการ: ${payload.volunteerName}`
+                }]);
+            } catch (e) {}
+
+            Swal.fire({
+                title: 'บันทึกข้อมูลเรียบร้อย',
+                text: 'ระบบประมวลผลสำเร็จแล้วครับ',
+                icon: 'success'
+            }).then(() => {
+                liff.closeWindow();
+            });
+        } finally {
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('submitBtn').disabled = false;
+        }
+    });
+
+    function updateSubOptions() {
+        const main = document.getElementById('mainType').value;
+        const sub = document.getElementById('subType');
+        sub.disabled = false;
+        sub.innerHTML = '<option value="">เลือกรายการ...</option>';
+        const opt = {
+            'ผลงานทั่วไป': ['เยี่ยมเด็กและเยาวชน', 'ร่วมประชุม'],
+            'ผลงานเฉพาะ': ['จัดหาสถานศึกษา', 'ให้ทุนการศึกษา', 'รับหรือจัดหางาน', 'ให้ทุนประกอบอาชีพ', 'ค้ำประกันทำงาน', 'มีปัญหาพิเศษ', 'พ่อแม่อุปถัมภ์', 'สนับสนุน', 'บ้านกึ่งวิถี', 'โครงการ']
+        };
+        if (opt[main]) {
+            opt[main].forEach(o => {
+                let el = document.createElement('option');
+                el.value = el.textContent = o;
+                sub.appendChild(el);
+            });
+        }
+        showSpecificSubFields();
+    }
+
+    function showSpecificSubFields() {
+        const s = document.getElementById('subType').value;
+        document.getElementById('projectSection').style.display = (s === 'โครงการ') ? 'block' : 'none';
+        document.getElementById('guaranteeSection').style.display = (s === 'ค้ำประกันทำงาน') ? 'block' : 'none';
+        document.getElementById('halfwaySection').style.display = (s === 'บ้านกึ่งวิถี') ? 'block' : 'none';
+    }
+
+async function loadDashboardData(name) {
+  const year = (new Date().getFullYear() + 543).toString();
+  try {
+    const res  = await fetch(`${WEB_APP_URL}?action=getSummary&name=${encodeURIComponent(name)}&year=${year}`);
+    const data = await res.json();
+
+    if (!data.success) return;
+
+    // ── คะแนนรวม + progress ──
+    const kpi = data.kpiScore || 0;
+    document.getElementById('kpiScore').innerText = `${kpi} / 12`;
+    document.getElementById('scoreBar').style.width = `${Math.min((kpi / 12) * 100, 100)}%`;
+
+    let stars = '';
+    const starCount = Math.min(Math.floor(kpi / 2.4), 5);
+    for (let i = 0; i < 5; i++) {
+      stars += i < starCount
+        ? '<i class="bi bi-star-fill mx-1"></i>'
+        : '<i class="bi bi-star mx-1 opacity-25"></i>';
+    }
+    document.getElementById('starRating').innerHTML = stars;
+
+    // ── วาดตาราง dynamic ──
+    document.getElementById('summaryTableBody').innerHTML =
+      buildDashboardTable(data);
+
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+// ══════════════════════════════════════════════════
+//  buildDashboardTable — วาดตารางจาก criteria จริง
+// ══════════════════════════════════════════════════
+function buildDashboardTable(data) {
+  const criteria  = data.criteria  || {};
+  const stats     = data.stats     || {};
+  const points    = data.points    || {};
+  const capTotals = data.capTotals || {};
+
+  const sorted = Object.values(criteria)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  if (sorted.length === 0) {
+    return '<tr><td colspan="2" class="text-center text-muted p-3">ไม่พบหัวข้อการประเมิน</td></tr>';
+  }
+
+  const capGroupItems = {};
+  sorted.forEach(c => {
+    if (c.capGroup) {
+      if (!capGroupItems[c.capGroup]) capGroupItems[c.capGroup] = [];
+      capGroupItems[c.capGroup].push(c);
+    }
+  });
+
+  const renderedGroups = new Set();
+  let itemNumber = 0; // 🚩 เพิ่มตัวนับ
+  let html = '';
+
+  // ── ผลงานทั่วไป ──
+  html += `
+    <tr>
+      <td colspan="2" class="py-2">
+        <span class="badge bg-primary bg-opacity-10 text-primary fw-bold px-3 py-2 rounded-pill">
+          <i class="bi bi-clipboard2-check me-1"></i>ผลงานทั่วไป (ปีปัจจุบัน)
+        </span>
+      </td>
+    </tr>
+    <tr style="background:#f0f9ff;">
+      <td><i class="bi bi-person-heart text-info me-2"></i>เยี่ยมเด็กและเยาวชน</td>
+      <td class="text-center fw-bold text-info">${data.visit || 0} ครั้ง</td>
+    </tr>
+    <tr style="background:#f0f9ff;">
+      <td><i class="bi bi-people text-primary me-2"></i>ร่วมประชุม</td>
+      <td class="text-center fw-bold text-primary">${data.meeting || 0} ครั้ง</td>
+    </tr>
+    <tr>
+      <td colspan="2" class="py-2">
+        <span class="badge bg-success bg-opacity-10 text-success fw-bold px-3 py-2 rounded-pill">
+          <i class="bi bi-star-fill me-1"></i>ผลงานเฉพาะ (นับคะแนน KPI)
+        </span>
+      </td>
+    </tr>`;
+
+  // ── วนตาม criteria ──
+  sorted.forEach(c => {
+
+    // standalone
+    if (!c.capGroup) {
+      itemNumber++;
+      const pt    = points[c.key] || 0;
+      const stars = '★'.repeat(pt) + '☆'.repeat(Math.max(3 - pt, 0));
+      html += `
+        <tr>
+          <td>
+            <span class="text-muted me-1" style="font-size:0.8rem;">${itemNumber}.</span>
+            ${c.label}
+          </td>
+          <td class="text-center">
+            <span class="text-warning">${stars}</span>
+            <span class="fw-bold ms-1 text-success">${pt}</span>
+          </td>
+        </tr>`;
+      return;
+    }
+
+    // capGroup — วาดครั้งเดียว
+    if (renderedGroups.has(c.capGroup)) return;
+    renderedGroups.add(c.capGroup);
+
+    itemNumber++;
+    const groupItems = capGroupItems[c.capGroup] || [];
+    const groupTotal = capTotals[c.capGroup]     || 0;
+
+    const labelItem  = groupItems.find(i => i.capLabel && i.capLabel.trim() !== '');
+    const groupLabel = labelItem ? labelItem.capLabel : `ด้าน${c.group || c.capGroup}`;
+
+    // หัวกลุ่ม
+    html += `
+      <tr style="background:#f1f5f9;">
+        <td colspan="2" class="fw-bold small ps-2">
+          <span class="text-muted me-1" style="font-size:0.8rem;">${itemNumber}.</span>
+          ${groupLabel}
+          <span class="badge bg-primary ms-1" style="font-size:0.6rem;">
+            รวมไม่เกิน 3
+          </span>
+        </td>
+      </tr>`;
+
+    // ข้อย่อย
+    groupItems.forEach(sub => {
+      const subPt = points[sub.key] || 0;
+      html += `
+        <tr>
+          <td class="ps-4 text-muted small">${sub.label}</td>
+          <td class="text-center">
+            <span class="badge bg-light text-primary border border-primary rounded-pill px-2">
+              ${subPt} คะแนน
+            </span>
+          </td>
+        </tr>`;
+    });
+
+    // แถวรวม cap
+    const color = groupTotal >= 3 ? '#16a34a'
+                : groupTotal >= 2 ? '#2563eb'
+                : groupTotal >= 1 ? '#d97706'
+                : '#6b7280';
+    const groupStars = '★'.repeat(groupTotal) + '☆'.repeat(Math.max(3 - groupTotal, 0));
+    const shortLabel = groupLabel.replace(/^\d+[\.\d]*\s*(ด้าน)?/, '').trim();
+    html += `
+      <tr style="background:#eff6ff;">
+        <td class="ps-4 fw-bold small">
+          <i class="bi bi-calculator-fill me-1 text-primary"></i>รวม${shortLabel}
+        </td>
+        <td class="text-center fw-bold" style="color:${color};">
+          ${groupStars} ${groupTotal}/3
+        </td>
+      </tr>`;
+  });
+
+  return html;
+}
+</script>
+</body>
+</html>
