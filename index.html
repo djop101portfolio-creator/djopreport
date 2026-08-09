@@ -92,9 +92,7 @@
                 <div class="col-12">
                     <label class="form-label small">ประเภทผลงาน</label>
                     <select id="mainType" class="form-select" onchange="updateSubOptions()" required>
-                        <option value="">เลือกประเภทหลัก...</option>
-                        <option value="ผลงานทั่วไป">ผลงานทั่วไป</option>
-                        <option value="ผลงานเฉพาะ">ผลงานเฉพาะ</option>
+                        <option value="">กำลังโหลด...</option>
                     </select>
                 </div>
 
@@ -105,28 +103,17 @@
                     </select>
                 </div>
 
-                <div id="projectSection" class="col-12 section-special">
-                    <label class="form-label text-primary small">8. ประเภทโครงการ</label>
-                    <select id="projectType" class="form-select">
-                        <option value="พัฒนาพฤตินิสัย">8.1 โครงการพัฒนาพฤตินิสัย</option>
-                        <option value="ฝึกวิชาชีพ">8.2 โครงการฝึกวิชาชีพ</option>
-                        <option value="พัฒนาบุคลากร">8.3 โครงการพัฒนาบุคลากร</option>
-                    </select>
+                <!-- 🆕 v2.8: ช่องเลือกรายละเอียดย่อย (capGroup เช่น ค้ำประกัน/โครงการ/บ้านกึ่งวิถี) แบบ dynamic
+                     แทนที่ projectSection/guaranteeSection/halfwaySection เดิมที่ hardcode ไว้ ให้ตรงกับ
+                     หน้าเว็บหลัก (Index.html) ซึ่งอ่านโครงสร้างจาก Score_Criteria ของ Server โดยตรง -->
+                <div id="dynamicSubFieldSection" class="col-12 section-special">
+                    <label class="form-label text-primary small" id="dynamicSubFieldLabel">เลือกรายละเอียด</label>
+                    <select id="dynamicSubDetail" class="form-select"></select>
                 </div>
-                <div id="guaranteeSection" class="col-12 section-special">
-                    <label class="form-label text-success small">5. ประเภทการค้ำประกัน</label>
-                    <select id="guaranteeType" class="form-select">
-                        <option value="บริษัท">5.1 ในบริษัท</option>
-                        <option value="ห้างหุ้นส่วน">5.2 ในห้างหุ้นส่วนหรืออื่นๆ</option>
-                    </select>
-                </div>
-                <div id="halfwaySection" class="col-12 section-special">
-                    <label class="form-label text-warning small">10. รายละเอียดบ้านกึ่งวิถี</label>
-                    <select id="halfwayType" class="form-select">
-                        <option value="จัดตั้ง">10.1 จัดตั้งบ้านกึ่งวิถี</option>
-                        <option value="สนับสนุน">10.2 สนับสนุนการดำเนินงาน</option>
-                    </select>
-                </div>
+
+                <!-- 🆕 v2.8: ช่องกรอก/เลือกชื่อเด็ก (พ่อแม่อุปถัมภ์ / มีปัญหาพิเศษ + หัวข้อเยี่ยม)
+                     เนื้อหาวาดแบบ dynamic ผ่าน JS ตามหัวข้อที่เลือก เหมือนหน้าเว็บหลัก -->
+                <div id="childNameSection" class="col-12 section-special"></div>
 
                 <div class="col-12">
                     <label class="form-label small">วันที่จัดกิจกรรม</label>
@@ -159,7 +146,12 @@
     const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwldz8dvoKr9o1HevJmBA8cO_UJn0NFQPu5p0JU7EWyg3yFcY3ovYfa1nIHIuXOXvy_/exec";
     const LIFF_ID = "2010969324-5Mkx0PDP";
     let currentUser = null;
-    let selectedFiles = []; 
+    let selectedFiles = [];
+    // 🆕 v2.8: cache โครงสร้างหัวข้อจาก getActiveCriteriaForForm() (เหมือนหน้าเว็บหลัก)
+    let cachedCriteriaForm = null;
+    // 🆕 v2.8: cache รายการ criteriaKey ที่กรรมการคนที่กำลังกรอกอยู่เคยบันทึกไว้ ใช้กรอง
+    // หัวข้อ "เยี่ยม" (childNameSourceKey) ไม่ให้โผล่ถ้ายังไม่เคยบันทึกหัวข้อต้นทางมาก่อน
+    let cachedVolunteerUsedKeys = [];
 
 window.onload = function() {
         liff.init({ liffId: LIFF_ID })
@@ -221,6 +213,9 @@ window.onload = function() {
                     if (vName) {
                         document.getElementById('staffSection').style.display = 'block';
                         document.getElementById('volunteerName').value = vName;
+                        // 🆕 v2.8: โหลดโครงสร้างหัวข้อจาก Server + รายการหัวข้อที่กรรมการคนนี้
+                        // เคยบันทึกไว้แล้ว (ใช้กรองว่าหัวข้อ "เยี่ยม" ควรแสดงหรือไม่)
+                        loadCriteriaForm().then(() => fetchVolunteerUsedKeys(vName));
                     } else {
                         Swal.fire('เข้าถึงไม่ถูกต้อง', 'กรุณาค้นหาชื่อกรรมการจากแชทบอทเพื่อบันทึกงานครับ', 'warning').then(() => liff.closeWindow());
                     }
@@ -303,6 +298,23 @@ window.onload = function() {
         });
         if (!confirm.isConfirmed) return;
 
+        // 🆕 v2.8: ตรวจสอบว่าเลือกหัวข้อผลงานจริง (criteriaKey) และกรอกชื่อเด็กครบ (ถ้าต้องใช้)
+        const criteriaKey = getSelectedCriteriaKey();
+        if (!criteriaKey) {
+            Swal.fire('คำเตือน', 'กรุณาเลือกรายการผลงานให้ครบถ้วน', 'warning');
+            return;
+        }
+        const childSectionCheck = document.getElementById('childNameSection');
+        if (childSectionCheck && childSectionCheck.style.display !== 'none') {
+            const childInputCheck = document.getElementById('childNameInput');
+            const childSelectCheck = document.getElementById('childNameSelect');
+            const childValCheck = childInputCheck ? childInputCheck.value.trim() : (childSelectCheck ? childSelectCheck.value : '');
+            if (!childValCheck) {
+                Swal.fire('คำเตือน', 'กรุณาระบุ/เลือกชื่อเด็กให้ครบ', 'warning');
+                return;
+            }
+        }
+
         document.getElementById('loaderText').innerText = "กำลังย่อขนาดรูปภาพและส่งข้อมูล...";
         document.getElementById('loader').style.display = 'flex';
         document.getElementById('submitBtn').disabled = true;
@@ -322,19 +334,18 @@ window.onload = function() {
             fileData.push({ base64: base64, mimeType: file.type, fileName: file.name });
         }
 
+        // 🆕 v2.8: ใช้ getSelectedLabels() คำนวณ mainType/subType/subDetail แบบ dynamic
+        // (รองรับทั้ง capGroup และชื่อเด็ก) แทนการอ้างชื่อหัวข้อ hardcode แบบเดิม
+        const labels = getSelectedLabels();
+
         const payload = {
             userId: liff.getContext().userId,
             year: document.getElementById('year').value,
             volunteerName: volunteer,
-            mainType: document.getElementById('mainType').value,
-            subType: document.getElementById('subType').value,
-            subDetail: (function() {
-                const s = document.getElementById('subType').value;
-                if (s === 'โครงการ') return document.getElementById('projectType').value;
-                if (s === 'ค้ำประกันทำงาน') return document.getElementById('guaranteeType').value;
-                if (s === 'บ้านกึ่งวิถี') return document.getElementById('halfwayType').value;
-                return "-";
-            })(),
+            mainType: labels.mainType,
+            subType: labels.subType,
+            subDetail: labels.subDetail,
+            criteriaKey: criteriaKey, // 🆕 v2.8: ขาดไปเดิมทำให้ Server ปฏิเสธการบันทึกเสมอ
             date: document.getElementById('date').value,
             details: document.getElementById('details').value,
             files: fileData
@@ -395,30 +406,196 @@ window.onload = function() {
         }
     });
 
+    /**
+     * 🆕 v2.8 — โหลดโครงสร้างหัวข้อผลงานจาก Server (เหมือนหน้าเว็บหลัก) แทนการ hardcode
+     * รายชื่อหัวข้อไว้ในไฟล์นี้เอง ซึ่งจะไม่มีวันตรงกับ Score_Criteria จริงถ้ามีการแก้ไข
+     * เกณฑ์คะแนนที่หน้าเว็บหลักในอนาคต (เพิ่ม/ลบ/แก้ไขหัวข้อ)
+     */
+    async function loadCriteriaForm() {
+        try {
+            const res = await fetch(`${WEB_APP_URL}?action=getCriteriaForm`);
+            const data = await res.json();
+            if (data.success) {
+                cachedCriteriaForm = data.data;
+                const mainTypeSelect = document.getElementById('mainType');
+                mainTypeSelect.innerHTML = '<option value="">เลือกประเภทหลัก...</option>';
+                Object.keys(cachedCriteriaForm).forEach(mt => {
+                    const opt = document.createElement('option');
+                    opt.value = mt;
+                    opt.textContent = mt;
+                    mainTypeSelect.appendChild(opt);
+                });
+            }
+        } catch (e) {
+            console.error('โหลดโครงสร้างหัวข้อผลงานไม่สำเร็จ:', e);
+            Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถโหลดโครงสร้างหัวข้อผลงานได้ กรุณาลองใหม่', 'error');
+        }
+    }
+
+    /**
+     * 🆕 v2.8 — โหลดรายการ criteriaKey ที่กรรมการคนนี้เคยบันทึกไว้แล้ว ใช้กรองว่าหัวข้อ
+     * "เยี่ยม" (ผูก childNameSourceKey) ควรแสดงให้เลือกหรือไม่ — กันกรณี dropdown ชื่อเด็ก
+     * ว่างเปล่าเพราะยังไม่เคยบันทึกหัวข้อต้นทาง (เช่น พ่อแม่อุปถัมภ์) มาก่อนเลย
+     */
+    async function fetchVolunteerUsedKeys(vName) {
+        try {
+            const url = `${WEB_APP_URL}?action=getVolunteerUsedKeys&userId=${liff.getContext().userId}&name=${encodeURIComponent(vName)}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            cachedVolunteerUsedKeys = (data && data.success) ? data.keys : [];
+        } catch (e) {
+            console.error('โหลดรายการหัวข้อที่เคยบันทึกไม่สำเร็จ:', e);
+            cachedVolunteerUsedKeys = [];
+        }
+    }
+
+    /**
+     * v2.8 — เติม dropdown "รายการผลงาน" (subType) แบบ dynamic ตาม mainType ที่เลือก
+     * กรองหัวข้อ "เยี่ยม" ออกถ้ากรรมการยังไม่เคยบันทึกหัวข้อต้นทางมาก่อน (ดู cachedVolunteerUsedKeys)
+     */
     function updateSubOptions() {
         const main = document.getElementById('mainType').value;
         const sub = document.getElementById('subType');
         sub.disabled = false;
         sub.innerHTML = '<option value="">เลือกรายการ...</option>';
-        const opt = {
-            'ผลงานทั่วไป': ['เยี่ยมเด็กและเยาวชน', 'ร่วมประชุม'],
-            'ผลงานเฉพาะ': ['จัดหาสถานศึกษา', 'ให้ทุนการศึกษา', 'รับหรือจัดหางาน', 'ให้ทุนประกอบอาชีพ', 'ค้ำประกันทำงาน', 'มีปัญหาพิเศษ', 'พ่อแม่อุปถัมภ์', 'สนับสนุน', 'บ้านกึ่งวิถี', 'โครงการ']
-        };
-        if (opt[main]) {
-            opt[main].forEach(o => {
-                let el = document.createElement('option');
-                el.value = el.textContent = o;
-                sub.appendChild(el);
-            });
+
+        if (!main || !cachedCriteriaForm || !cachedCriteriaForm[main]) {
+            showSpecificSubFields();
+            return;
         }
+
+        cachedCriteriaForm[main].forEach(item => {
+            // 🆕 หัวข้อ "เยี่ยม" (ผูก childNameSourceKey) ต้องเคยบันทึกหัวข้อต้นทางมาก่อนถึงจะแสดง
+            if (item.childNameSourceKey && !cachedVolunteerUsedKeys.includes(item.childNameSourceKey)) return;
+            const el = document.createElement('option');
+            el.value = item.key;
+            el.textContent = item.label;
+            el.dataset.isCapGroupParent = item.isCapGroupParent ? '1' : '0';
+            sub.appendChild(el);
+        });
+
         showSpecificSubFields();
     }
 
+    /**
+     * v2.8 — แสดงช่องรายละเอียดย่อย (capGroup) หรือช่องชื่อเด็ก (requiresChildName) แบบ dynamic
+     * แทนการ hardcode ผูกกับชื่อหัวข้อแบบเดิม (โครงการ/ค้ำประกันทำงาน/บ้านกึ่งวิถี)
+     */
     function showSpecificSubFields() {
-        const s = document.getElementById('subType').value;
-        document.getElementById('projectSection').style.display = (s === 'โครงการ') ? 'block' : 'none';
-        document.getElementById('guaranteeSection').style.display = (s === 'ค้ำประกันทำงาน') ? 'block' : 'none';
-        document.getElementById('halfwaySection').style.display = (s === 'บ้านกึ่งวิถี') ? 'block' : 'none';
+        const main = document.getElementById('mainType').value;
+        const subSelect = document.getElementById('subType');
+        const subKey = subSelect.value;
+        const section = document.getElementById('dynamicSubFieldSection');
+        const subDetailSelect = document.getElementById('dynamicSubDetail');
+        const label = document.getElementById('dynamicSubFieldLabel');
+        const childSection = document.getElementById('childNameSection');
+
+        section.style.display = 'none';
+        subDetailSelect.innerHTML = '';
+        if (childSection) { childSection.style.display = 'none'; childSection.innerHTML = ''; }
+
+        if (!main || !subKey || !cachedCriteriaForm || !cachedCriteriaForm[main]) return;
+
+        const selectedItem = cachedCriteriaForm[main].find(item => item.key === subKey);
+
+        // หัวข้อเดี่ยวที่ต้องระบุชื่อเด็ก (พ่อแม่อุปถัมภ์/มีปัญหาพิเศษ/หัวข้อเยี่ยม)
+        if (selectedItem && !selectedItem.isCapGroupParent && selectedItem.requiresChildName) {
+            renderChildNameField(selectedItem);
+            return;
+        }
+
+        // หัวข้อกลุ่ม (capGroup) เช่น ค้ำประกัน/โครงการ/บ้านกึ่งวิถี
+        if (selectedItem && selectedItem.isCapGroupParent && selectedItem.subOptions && selectedItem.subOptions.length > 0) {
+            label.textContent = 'เลือกรายละเอียด: ' + selectedItem.label;
+            selectedItem.subOptions.forEach(sub => {
+                const opt = document.createElement('option');
+                opt.value = sub.key;
+                opt.textContent = sub.label;
+                subDetailSelect.appendChild(opt);
+            });
+            section.style.display = 'block';
+        }
+    }
+
+    /**
+     * 🆕 v2.8 — วาดช่องกรอก/เลือกชื่อเด็ก ตาม childNameSourceKey ของหัวข้อที่เลือก
+     * - childNameSourceKey ว่าง -> โหมด "ลงทะเบียน" พิมพ์อิสระ (พ่อแม่อุปถัมภ์/มีปัญหาพิเศษตัวจริง)
+     * - childNameSourceKey มีค่า -> โหมด "เลือกจากรายชื่อที่เคยลงทะเบียนไว้" (หัวข้อเยี่ยม)
+     */
+    async function renderChildNameField(selectedItem) {
+        const childSection = document.getElementById('childNameSection');
+        if (!childSection) return;
+        const vName = document.getElementById('volunteerName').value.trim();
+
+        if (!selectedItem.childNameSourceKey) {
+            childSection.innerHTML = `
+                <label class="form-label text-primary small"><i class="bi bi-person-heart"></i> ชื่อเด็กที่รับผิดชอบ</label>
+                <input type="text" id="childNameInput" class="form-control" placeholder="พิมพ์ชื่อ-นามสกุลเด็ก">`;
+            childSection.style.display = 'block';
+            return;
+        }
+
+        childSection.innerHTML = `
+            <label class="form-label text-primary small"><i class="bi bi-person-heart"></i> ชื่อเด็กที่เยี่ยม</label>
+            <select id="childNameSelect" class="form-select"><option value="">กำลังโหลดรายชื่อ...</option></select>`;
+        childSection.style.display = 'block';
+
+        try {
+            const url = `${WEB_APP_URL}?action=getChildNames&userId=${liff.getContext().userId}&name=${encodeURIComponent(vName)}&sourceKey=${encodeURIComponent(selectedItem.childNameSourceKey)}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            const select = document.getElementById('childNameSelect');
+            if (!select) return; // ผู้ใช้อาจสลับหัวข้ออื่นระหว่างรอโหลด
+            if (!data.success || !data.names || data.names.length === 0) {
+                select.innerHTML = '<option value="">ไม่พบเด็กที่ลงทะเบียนไว้ กรุณาบันทึกหัวข้อคะแนนจริงก่อน</option>';
+                return;
+            }
+            select.innerHTML = '<option value="">--- เลือกชื่อเด็ก ---</option>' +
+                data.names.map(n => `<option value="${n}">${n}</option>`).join('');
+        } catch (e) {
+            const select = document.getElementById('childNameSelect');
+            if (select) select.innerHTML = '<option value="">โหลดรายชื่อไม่สำเร็จ</option>';
+        }
+    }
+
+    /**
+     * v2.8 — คำนวณ criteriaKey ที่จะส่งไปบันทึกจริง (แทนการส่ง subType label ตรงๆ แบบเดิม
+     * ที่ทำให้ saveData() ฝั่ง Server ปฏิเสธเพราะไม่มี criteriaKey)
+     */
+    function getSelectedCriteriaKey() {
+        const subSelect = document.getElementById('subType');
+        const selectedOption = subSelect.options[subSelect.selectedIndex];
+        const isCapGroupParent = selectedOption && selectedOption.dataset.isCapGroupParent === '1';
+        if (isCapGroupParent) {
+            return document.getElementById('dynamicSubDetail').value || '';
+        }
+        return subSelect.value || '';
+    }
+
+    /**
+     * v2.8 — คำนวณ mainType/subType/subDetail ที่จะส่งไปบันทึก (label ที่อ่านง่ายสำหรับ
+     * เก็บใน Performance_DB) รวมถึงชื่อเด็กถ้าหัวข้อนั้นต้องระบุชื่อเด็ก
+     */
+    function getSelectedLabels() {
+        const main = document.getElementById('mainType').value;
+        const subSelect = document.getElementById('subType');
+        const subLabel = subSelect.options[subSelect.selectedIndex]?.textContent || '';
+
+        const childSection = document.getElementById('childNameSection');
+        if (childSection && childSection.style.display !== 'none') {
+            const childInput = document.getElementById('childNameInput');
+            const childSelect = document.getElementById('childNameSelect');
+            const childName = childInput ? childInput.value.trim() : (childSelect ? childSelect.value : '');
+            return { mainType: main, subType: subLabel, subDetail: childName || '-' };
+        }
+
+        const section = document.getElementById('dynamicSubFieldSection');
+        let subDetailLabel = '-';
+        if (section.style.display !== 'none') {
+            const subDetailSelect = document.getElementById('dynamicSubDetail');
+            subDetailLabel = subDetailSelect.options[subDetailSelect.selectedIndex]?.textContent || '-';
+        }
+        return { mainType: main, subType: subLabel, subDetail: subDetailLabel };
     }
 
 async function loadDashboardData(name) {
