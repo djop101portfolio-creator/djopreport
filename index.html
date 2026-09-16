@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบจัดการผลงานกรรมการสงเคราะห์ - สถานพินิจฯ ร้อยเอ็ด </title>
+    <title>ระบบจัดการผลงานกรรมการสงเคราะห์ - สถานพินิจฯ ขอนแก่น</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -45,6 +45,8 @@
                 <h4 class="header-title"><i class="bi bi-person-badge"></i> สรุปคะแนนสะสมของท่าน</h4>
                 <p id="volunteerDisplayName" class="text-primary fw-bold mb-0"></p>
             </div>
+            <!-- 🆕 v2.21: ปุ่มเลือกดูคะแนนย้อนหลัง (ไม่เกิน 3 ปีล่าสุดที่มีข้อมูลในระบบ) -->
+            <div id="scoreYearButtons" class="d-flex justify-content-center gap-2 mb-3 flex-wrap"></div>
             <div class="score-box">
                 <div class="small opacity-75">คะแนนสะสมรอบปีปัจจุบัน</div>
                 <h1 id="kpiScore" class="my-2">0 / 12</h1>
@@ -76,7 +78,7 @@
         <div class="card card-custom p-4">
             <div class="text-center mb-4">
                 <h4 class="header-title"><i class="bi bi-pencil-square"></i> บันทึกผลงานใหม่</h4>
-                <p class="text-muted small">ระบบสำหรับเจ้าหน้าที่สถานพินิจฯ ร้อยเอ็ด</p>
+                <p class="text-muted small">ระบบสำหรับเจ้าหน้าที่สถานพินิจฯ ขอนแก่น</p>
             </div>
             
             <form id="perfForm" class="row g-3">
@@ -195,7 +197,20 @@ window.onload = function() {
             });
     };
 
-    async function checkUserRole(lineId) {
+    /**
+ * 🆕 v2.20: คำนวณปีงบประมาณปัจจุบัน (1 ก.ย. - 31 ส.ค.) ตรงกับตรรกะของหน้าเว็บหลักเป๊ะๆ
+ * ใช้ตั้งค่าช่องปีในฟอร์มบันทึกผลงานอัตโนมัติ แทนการ hardcode ไว้ตรงๆ ใน HTML ที่จะค้าง
+ * ผิดปีทันทีที่ข้ามปีงบประมาณไปแล้ว
+ */
+function getCurrentWorkYear() {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    let year = now.getFullYear() + 543;
+    if (month >= 9) year = year + 1;
+    return year.toString();
+}
+
+async function checkUserRole(lineId) {
         try {
             const url = `${WEB_APP_URL}?action=getVolunteerByLine&userId=${lineId}`;
             const response = await fetch(url, { redirect: 'follow' });
@@ -213,6 +228,11 @@ window.onload = function() {
                     if (vName) {
                         document.getElementById('staffSection').style.display = 'block';
                         document.getElementById('volunteerName').value = vName;
+                        // 🐞 v2.20: ช่องปีเคย hardcode ไว้เป็น "2569" ตรงๆ ใน HTML ไม่มีจุดไหน
+                        // คำนวณปีปัจจุบันให้ใหม่เลย ทำให้ค้างผิดปีทันทีที่ข้ามปีงบประมาณไป
+                        // (หลัง 1 ก.ย.) ต้องตั้งค่าให้ถูกต้องทุกครั้งที่เปิดฟอร์ม
+                        const yearField = document.getElementById('year');
+                        if (yearField) yearField.value = getCurrentWorkYear();
                         // 🆕 v2.8: โหลดโครงสร้างหัวข้อจาก Server + รายการหัวข้อที่กรรมการคนนี้
                         // เคยบันทึกไว้แล้ว (ใช้กรองว่าหัวข้อ "เยี่ยม" ควรแสดงหรือไม่)
                         loadCriteriaForm().then(() => fetchVolunteerUsedKeys(vName));
@@ -223,12 +243,18 @@ window.onload = function() {
                     document.getElementById('volunteerDashboard').style.display = 'block';
                     document.getElementById('volunteerDisplayName').innerText = `สวัสดีคุณ ${data.fullname}`;
                     loadDashboardData(data.fullname);
+                    loadScoreYearButtons(data.fullname);
                 }
             } else {
                 Swal.fire('ไม่พบข้อมูล', 'กรุณายืนยันตัวตนใน LINE ก่อนใช้งานครับ', 'warning').then(() => liff.closeWindow());
             }
         } catch (err) {
-            Swal.fire('Error', 'ไม่สามารถเชื่อมต่อระบบได้', 'error');
+            // 🐞 v2.25: เดิมไม่ได้ปิด Loading ในจุดนี้เลย ถ้า fetch ล้มเหลว (เน็ตหลุด/ช้า
+            // ตอนใช้งานผ่านมือถือ) หน้าจะค้างที่ "กำลังตรวจสอบสิทธิ์..." ตลอดไป โดยมี popup
+            // error ซ้อนอยู่ข้างใต้ Loading ที่บังไว้จนมองไม่เห็น ต้องปิด Loading ก่อนเสมอ
+            // ไม่ว่าผลลัพธ์จะสำเร็จหรือล้มเหลวก็ตาม
+            document.getElementById('loader').style.display = 'none';
+            Swal.fire('Error', 'ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองเปิดใหม่อีกครั้งครับ', 'error');
         }
     }
 
@@ -511,10 +537,42 @@ window.onload = function() {
                 const opt = document.createElement('option');
                 opt.value = sub.key;
                 opt.textContent = sub.label;
+                // 🆕 v2.19: แนบไว้เผื่อหัวข้อย่อยในกลุ่ม (เช่น 10.3 ติดตามเด็กในบ้านกึ่งวิถี)
+                // ต้องมีช่องชื่อเด็กด้วย — พอร์ตมาจาก v2.15 ของหน้าเว็บหลัก
+                opt.dataset.requiresChildName = sub.requiresChildName ? '1' : '0';
+                opt.dataset.childNameSourceKey = sub.childNameSourceKey || '';
                 subDetailSelect.appendChild(opt);
             });
             section.style.display = 'block';
+            subDetailSelect.onchange = onDynamicSubDetailChange;
+            onDynamicSubDetailChange(); // เช็คทันทีเผื่อ default เลือกตัวแรกที่ต้องมีชื่อเด็กอยู่แล้ว
         }
+    }
+
+    /**
+     * 🆕 v2.19 — ตรวจสอบว่าหัวข้อย่อยที่เลือกในกลุ่ม Cap (เช่น บ้านกึ่งวิถี) ต้องเปิดช่อง
+     * ชื่อเด็กหรือไม่ — พอร์ตมาจาก onDynamicSubDetailChange() ของหน้าเว็บหลัก (v2.15)
+     * เดิมหน้า LIFF เช็ค requiresChildName ได้แค่หัวข้อเดี่ยวเท่านั้น
+     */
+    function onDynamicSubDetailChange() {
+        const subDetailSelect = document.getElementById('dynamicSubDetail');
+        const childSection = document.getElementById('childNameSection');
+        if (!subDetailSelect || !childSection) return;
+
+        const selectedOption = subDetailSelect.options[subDetailSelect.selectedIndex];
+        const requiresChildName = selectedOption && selectedOption.dataset.requiresChildName === '1';
+
+        if (!requiresChildName) {
+            childSection.style.display = 'none';
+            childSection.innerHTML = '';
+            return;
+        }
+
+        renderChildNameField({
+            key: selectedOption.value,
+            requiresChildName: true,
+            childNameSourceKey: selectedOption.dataset.childNameSourceKey || ''
+        });
     }
 
     /**
@@ -598,13 +656,24 @@ window.onload = function() {
         return { mainType: main, subType: subLabel, subDetail: subDetailLabel };
     }
 
-async function loadDashboardData(name) {
-  const year = (new Date().getFullYear() + 543).toString();
+/**
+ * 🐞 v2.21: เดิมคำนวณปีแบบดิบ (new Date().getFullYear() + 543) ไม่ตรงกับปีงบประมาณ
+ * ของระบบ (1 ก.ย. - 31 ส.ค.) เปลี่ยนมาใช้ getCurrentWorkYear() ให้ตรงกับหน้าเว็บหลัก
+ * และเพิ่มพารามิเตอร์ year (optional) ให้เลือกดูคะแนนปีย้อนหลังได้ผ่านปุ่มเลือกปี
+ */
+async function loadDashboardData(name, year) {
+  const targetYear = year || getCurrentWorkYear();
   try {
-    const res  = await fetch(`${WEB_APP_URL}?action=getSummary&name=${encodeURIComponent(name)}&year=${year}`);
+    const res  = await fetch(`${WEB_APP_URL}?action=getSummary&userId=${liff.getContext().userId}&name=${encodeURIComponent(name)}&year=${targetYear}`);
     const data = await res.json();
 
-    if (!data.success) return;
+    // 🐞 v2.24: เดิม return เงียบๆ ตอนล้มเหลว ไม่มีร่องรอยอะไรให้ตรวจสอบเลยแม้แต่ใน Console
+    // ทำให้กว่าจะรู้ว่า userId หายไปจาก URL ต้องไล่เช็คหลายรอบ เพิ่ม log ข้อความจริงจาก
+    // Server ไว้เผื่อเกิดปัญหาลักษณะนี้อีกในอนาคตจะได้เห็นสาเหตุได้เร็วขึ้น
+    if (!data.success) {
+      console.error('โหลดคะแนนไม่สำเร็จ:', data.message || '(ไม่มีข้อความ error จาก Server)');
+      return;
+    }
 
     // ── คะแนนรวม + progress ──
     const kpi = data.kpiScore || 0;
@@ -622,21 +691,78 @@ async function loadDashboardData(name) {
 
     // ── วาดตาราง dynamic ──
     document.getElementById('summaryTableBody').innerHTML =
-      buildDashboardTable(data);
+      buildDashboardTable(data, targetYear);
 
   } catch(e) {
     console.error(e);
   }
 }
 
+/**
+ * 🆕 v2.21 — โหลดปุ่มเลือกดูคะแนนย้อนหลัง ไม่เกิน 3 ปีล่าสุดที่มีข้อมูลอยู่จริงในระบบ
+ * (ดึงจาก action=getPerformanceYears ซึ่งคืนรายการปีเรียงจากล่าสุดไปเก่าสุดอยู่แล้ว)
+ */
+async function loadScoreYearButtons(name) {
+  const container = document.getElementById('scoreYearButtons');
+  if (!container) return;
+
+  try {
+    const res = await fetch(`${WEB_APP_URL}?action=getPerformanceYears`);
+    const data = await res.json();
+
+    const currentYear = getCurrentWorkYear();
+    let years = (data && data.success && data.years && data.years.length > 0) ? data.years : [currentYear];
+    if (!years.includes(currentYear)) years.unshift(currentYear); // เผื่อปีปัจจุบันยังไม่มีข้อมูลเลยก็ยังเลือกดูได้
+    years = years.slice(0, 3); // 🚩 ไม่เกิน 3 ปีล่าสุดตามที่กำหนด
+
+    renderScoreYearButtons(years, currentYear, name);
+  } catch (e) {
+    console.error('โหลดรายการปีไม่สำเร็จ:', e);
+    renderScoreYearButtons([getCurrentWorkYear()], getCurrentWorkYear(), name);
+  }
+}
+
+/**
+ * 🆕 v2.21 — วาดปุ่มเลือกปี + ผูก event คลิกเปลี่ยนปีที่กำลังดูอยู่
+ */
+function renderScoreYearButtons(years, activeYear, name) {
+  const container = document.getElementById('scoreYearButtons');
+  if (!container) return;
+
+  container.innerHTML = years.map(y => `
+    <button type="button"
+      class="btn btn-sm rounded-pill px-3 fw-bold ${y === activeYear ? 'btn-primary' : 'btn-outline-primary'}"
+      data-year="${y}" onclick="onScoreYearButtonClick('${y}', '${_jsSafe(name)}')">
+      พ.ศ. ${y}
+    </button>`).join('');
+}
+
+/**
+ * 🆕 v2.21 — เมื่อกดปุ่มเลือกปี: อัปเดตสถานะปุ่มที่กด (active) แล้วโหลดคะแนนของปีนั้นใหม่
+ */
+function onScoreYearButtonClick(year, name) {
+  document.querySelectorAll('#scoreYearButtons button').forEach(btn => {
+    const isActive = btn.dataset.year === year;
+    btn.classList.toggle('btn-primary', isActive);
+    btn.classList.toggle('btn-outline-primary', !isActive);
+  });
+  loadDashboardData(name, year);
+}
+
+// 🆕 v2.21 — ตัดอักขระที่จะทำให้ onclick attribute พังไป (เช่น เครื่องหมายคำพูดเดี่ยวในชื่อ)
+function _jsSafe(str) {
+  return (str || '').toString().replace(/'/g, "\\'");
+}
+
 // ══════════════════════════════════════════════════
 //  buildDashboardTable — วาดตารางจาก criteria จริง
 // ══════════════════════════════════════════════════
-function buildDashboardTable(data) {
+function buildDashboardTable(data, targetYear) {
   const criteria  = data.criteria  || {};
   const stats     = data.stats     || {};
   const points    = data.points    || {};
   const capTotals = data.capTotals || {};
+  const yearLabel = targetYear || getCurrentWorkYear();
 
   const sorted = Object.values(criteria)
     .sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -662,7 +788,7 @@ function buildDashboardTable(data) {
     <tr>
       <td colspan="2" class="py-2">
         <span class="badge bg-primary bg-opacity-10 text-primary fw-bold px-3 py-2 rounded-pill">
-          <i class="bi bi-clipboard2-check me-1"></i>ผลงานทั่วไป (ปีปัจจุบัน)
+          <i class="bi bi-clipboard2-check me-1"></i>ผลงานทั่วไป (ปี พ.ศ. ${yearLabel})
         </span>
       </td>
     </tr>
